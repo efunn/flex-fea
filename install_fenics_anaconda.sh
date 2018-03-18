@@ -1,2 +1,3 @@
-conda create -n fenicsproject -c conda-forge fenics
-source activate fenicsproject
+conda config --add channels conda-forge
+conda install fenics
+conda install mshr
