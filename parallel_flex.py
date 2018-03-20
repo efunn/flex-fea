@@ -5,7 +5,7 @@ import numpy as np
 
 class ParallelFlex(object):
     def __init__(self):
-        # constants
+        # geometry constants
         self.end_thk = 5*1e-3
         self.wall_gap = 2.4*1e-3
         self.mirror_width = 5*1e-3
@@ -14,6 +14,22 @@ class ParallelFlex(object):
         self.total_thk = 7.5e-3
         self.top_key_height = 3e-3
         self.support_poly_gap = 1e-3
+
+        # PDE params (need to translate to FEniCS from Matlab)
+        self.pde_e = 1300e6 #2310e6 # Pa (reported between 1000 and 2000 MPa) # 1300 MPa from other datasheet?
+        self.pde_gnu = .408 # Poisson's ratio of the material: 0.408
+        self.pde_f = np.array([0, 0]).T # No body forces
+        G = self.pde_e/(2.*(1+self.pde_gnu))
+        # mu = 2*G*self.pde_gnu/(1-self.pde_gnu) # plane stress
+        mu = 2*G*self.pde_gnu/(1-2*self.pde_gnu) # plane strain
+        self.pde_c = np.array([2*G+mu, 0, G,   0, G, mu, 0,  G, 0, 2*G+mu]).T
+        # TODO: create (vector) function space
+        # V = VectorFunctionSpace(self.mesh, "CG", 1)
+        # create boundary conditions:
+        # class Border(SubDomain):
+        #     def inside(self, x, on_boundary):
+        #         return x[1]==0.0
+        # bc = DirichletBC(V, 0., border) 
 
     def set_geometry(self, wall_thk=1, wall_len=15,
             theta=45, pinch_len=40, press_pos=0, resolution=45):
@@ -93,14 +109,15 @@ class ParallelFlex(object):
         self.domain = (body+bottom_press_rect+top_press_rect+top_key_rect
             -corner_rect_1-corner_rect_2-corner_rect_3-corner_rect_4 
             -left_poly-right_poly-mid_poly_1-mid_poly_2)#+press_support_poly)
-        self.mesh = generate_mesh(self.domain,resolution=resolution)
+        self.mesh = generate_mesh(self.domain,resolution)
+
+    def show_geometry(self):
         df.plot(self.mesh,interactive=True)
 
 def deg2rad(degrees):
     return degrees*pi/180.
 
 if __name__ == '__main__':
-    pass
-    # flex = 
-    # mesh2d = generate_mesh(domain, 45)
-    # df.plot(mesh2d)
+    flex = ParallelFlex()
+    flex.set_geometry()
+    flex.show_geometry()
