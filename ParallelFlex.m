@@ -1,12 +1,12 @@
-classdef FeaDataStructure < handle
+classdef ParallelFlex < handle
     properties
     % constants
+    total_thk = 7.5e-3 % thickness of flexure (into the plane)
     end_thk = 5*1e-3
     wall_gap = 2.4*1e-3
     mirror_width = 5*1e-3
     press_len = 2*1e-3
     press_width = 0.5*1e-3
-    total_thk = 7.5e-3
     top_key_height = 3e-3
     support_poly_gap = 1e-3
 
@@ -23,29 +23,20 @@ classdef FeaDataStructure < handle
     total_width
     total_len
 
-    % pde
+    % structural properties
+    youngs_modulus = 1300e6 %2310e6 % Pa (reported between 1000 and 2000 MPa) % 1300 MPa from other datasheet?
+    poissons_ratio = .408 % Poisson's ratio of the material: 0.408
+
+    % pde, forces, and geometry
     model
     edges
-    pde_c
-    pde_e = 1300e6 %2310e6 % Pa (reported between 1000 and 2000 MPa) % 1300 MPa from other datasheet?
-    pde_gnu = .408 % Poisson's ratio of the material: 0.408
-    pde_f = [0 0]' % No body forces
-    % with press support poly
     geo_names = char('body','corner1','corner2','corner3','corner4',...
                      'left_poly','right_poly','bottom_poly','top_poly','press_support_poly',...
                      'top_key','bottom_press','top_press')';
     geo_formula = '(body+bottom_press+top_press+top_key)-corner1-corner2-corner3-corner4-left_poly-right_poly-bottom_poly-top_poly+press_support_poly';
-    % without press support poly
-    % geo_names = char('body','corner1','corner2','corner3','corner4',...
-    %                  'left_poly','right_poly','bottom_poly','top_poly',...
-    %                  'top_key','bottom_press','top_press')';
-    % geo_formula = '(body+bottom_press+top_press+top_key)-corner1-corner2-corner3-corner4-left_poly-right_poly-bottom_poly-top_poly';
     force_app
     surface_traction
     results
-    results_p
-    results_e
-    results_t
     deflection_x
     deflection_y
     theta_buffer
@@ -56,11 +47,8 @@ classdef FeaDataStructure < handle
     end
 
     methods
-        function self = FeaDataStructure(wall_thk, wall_len, theta, force_app, pinch_len, press_pos)
-            G = self.pde_e/(2.*(1+self.pde_gnu));
-            % mu = 2*G*self.pde_gnu/(1-self.pde_gnu); % plane stress
-            mu = 2*G*self.pde_gnu/(1-2*self.pde_gnu); % plane strain
-            self.pde_c = [2*G+mu; 0; G;   0; G; mu; 0;  G; 0; 2*G+mu];
+        function self = ParallelFlex(wall_thk, wall_len, theta, force_app, pinch_len, press_pos)
+            % sample init: flex = ParallelFlex(1,15,45,15,40,0)
             self.setAndSolve(wall_thk, wall_len, theta, force_app, pinch_len, press_pos);
         end
 
@@ -131,7 +119,6 @@ classdef FeaDataStructure < handle
             pad2 = zeros(2,4);
             pad4 = zeros(4,4);
             % press_support poly
-            % x11 = x7+self.support_poly_gap/sin(deg2rad(self.theta));
             sup_x2 = x7+self.support_poly_gap/sin(deg2rad(self.theta));
             sup_x1 = sup_x2+(self.angle_wall_len-self.support_poly_gap/sin(deg2rad(self.theta)))*cos(deg2rad(self.theta));
             sup_x3 = x10-self.support_poly_gap/sin(deg2rad(self.theta));
@@ -157,23 +144,20 @@ classdef FeaDataStructure < handle
         function setModel(self, force_app)
             self.force_app = force_app;
             self.surface_traction = self.force_app/self.total_thk/self.press_len;
-            self.model = createpde(2);
+            self.model = createpde('structural','static-planestrain');
             geometryFromEdges(self.model,self.edges);
-            specifyCoefficients(self.model,'m',0,'d',0,'c',self.pde_c,'a',0,'f',self.pde_f);
-            applyBoundaryCondition(self.model,'neumann','edge',1:self.model.Geometry.NumEdges,'g',[0 0]);
+            structuralProperties(self.model,'YoungsModulus',self.youngs_modulus,'PoissonsRatio',self.poissons_ratio); 
             fixed_edge = intersect(find(self.edges(4,:)==min(self.edges(4,:))),find(self.edges(5,:)==min(self.edges(5,:))));
             force_edge = intersect(find(self.edges(4,:)==max(self.edges(4,:))),find(self.edges(5,:)==max(self.edges(5,:))));
-            applyBoundaryCondition(self.model,'dirichlet','edge',fixed_edge,'u',[0 0]);
-            applyBoundaryCondition(self.model,'neumann','edge',force_edge,'g',[0 -self.surface_traction]);
-            % setInitialConditions(self.model,0);
-            generateMesh(self.model,'Hmax',.5*1e-3,'GeometricOrder','quadratic');
+            structuralBC(self.model,'Constraint','fixed','Edge',fixed_edge);
+            structuralBoundaryLoad(self.model,'Edge',force_edge,'SurfaceTraction',[0; -self.surface_traction]);
+            generateMesh(self.model,'Hmax',.5*1e-3);
         end
 
         function solveModel(self)
-            self.results = solvepde(self.model);
-            [self.results_p,self.results_e,self.results_t]=meshToPet(self.results.Mesh);
-            self.deflection_x = max(self.results.NodalSolution(:,1));
-            self.deflection_y = abs(min(self.results.NodalSolution(:,2)));
+            self.results = solve(self.model);
+            self.deflection_x = max(self.results.Displacement.ux);
+            self.deflection_y = abs(min(self.results.Displacement.uy));
         end
 
         function showGeometry(self)
@@ -181,11 +165,11 @@ classdef FeaDataStructure < handle
         end
 
         function showDeflectionX(self)
-            pdeplot(self.results_p+self.results.NodalSolution',self.results_e,self.results_t,'XYData',self.results.NodalSolution(:,1));
+            pdeplot(self.model,'XYData',self.results.Displacement.ux,'Deformation',self.results.Displacement,'DeformationScaleFactor',1);
         end
 
         function showDeflectionY(self)
-            pdeplot(self.results_p+self.results.NodalSolution',self.results_e,self.results_t,'XYData',self.results.NodalSolution(:,2));
+            pdeplot(self.model,'XYData',self.results.Displacement.uy,'Deformation',self.results.Displacement,'DeformationScaleFactor',1);
         end
 
         function calcDeflectionByForce(self, force_vector)
