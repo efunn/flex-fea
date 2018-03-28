@@ -10,6 +10,11 @@ You will need a relatively new version of matlab (>=R2017b) because the syntax f
 
 A sample model can be created and shown with the following commands:
 ```
-flex = ParallelFlex(1,15,45,15,40,0)
-flex.showDeflectionY()
+stl_filename = 'ultra-amp-4mm.stl'
+flex = UltraFlexure(stl_filename);
+flex.solveModal();
+flex.showModes();
+modes_to_show = 4:9;
+flex.generateFrames(modes_to_show);
+flex.showMovie();
 ```
